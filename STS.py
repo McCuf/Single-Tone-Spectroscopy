@@ -301,10 +301,10 @@ class STSSolution:
         return total
 
     def extract_hamiltonian_params(self):
-        bounds_array_upper = [np.mean(self.freq_span)+.001, .04, 12.0, 0.9]
-        bounds_array_lower = [np.mean(self.freq_span)- .001, .02, 4.0, 0.0]
+        bounds_array_upper = [np.mean(self.freq_span)+.001, .1, 12.0, 0.9]
+        bounds_array_lower = [np.mean(self.freq_span)- .001, .09, 4.0, 0.0]
 
-        x_initial = [np.mean(self.freq_span)-.0005, .025, 4.5, .5]
+        x_initial = [np.mean(self.freq_span)-.0005, .095, 4.5, .5]
         bounds = ParamBounds(xmax=bounds_array_upper, xmin=bounds_array_lower)
 
         print("Attempting to minimize loss function for Hamiltonian parameters")
