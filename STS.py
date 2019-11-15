@@ -11,6 +11,8 @@ from scipy.optimize import basinhopping
 from scipy.optimize import brute
 from scipy.optimize import Bounds
 
+
+
 class STSSolution:
     safely_created = True  # Flag variable which alerts the user if the data is read in incorrectly.
     # Check for corrupted data or misaligned data if this value gets flipped
@@ -62,16 +64,21 @@ class STSSolution:
 
     def configure_data(self):
 
-        with open(self.path) as f:  # Parse the .dat file and read in data
-            for line in f:
-                self.dataLength += 1
-                self.data.append(np.array(line.split(), dtype=np.float))
+        self.data = np.loadtxt(self.path)
 
-        self.dataWidth = len(self.data[0])
+        self.dataLength = self.data.shape[0]
+        self.dataWidth = self.data.shape[1]
+
+        # with open(self.path) as f:  # Parse the .dat file and read in data
+        #     for line in f:
+        #         self.dataLength += 1
+        #         self.data.append(np.array(line.split(), dtype=np.float))
+
+        # self.dataWidth = len(self.data[0])
 
         self.check_data()  # Perform uniformity check
 
-        self.data = np.array(self.data)  # cast to numpy array
+        # self.data = np.array(self.data)  # cast to numpy array
 
         # Gather the freq/volt information from the path variable. TODO: Add param to __init__ to make this optional
 
