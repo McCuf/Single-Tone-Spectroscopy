@@ -9,8 +9,9 @@ from scipy import signal
 from scipy.optimize import minimize
 from scipy.optimize import basinhopping
 from scipy.optimize import brute
+from scipy.optimize import Bounds
 
-# /Users/aarontrowbridge/LabStuff/Single-Tone-Spectroscopy/AB40_S21vsFvsV_fr6.03_6.05_Pr-80_V-1.5_1.5_0.1_T0.084_Cav2_143704_mag.dat
+
 
 class STSSolution:
     safely_created = True  # Flag variable which alerts the user if the data is read in incorrectly.
@@ -33,7 +34,13 @@ class STSSolution:
     phi_param = 0.0  # Extracted meander start (units of voltage)
     duty_param = 0.0  # Extracted duty cycle
     voltage_sweet_spot = 0.0  # Voltage location of sweet spot
+    freq_sweet_spot = 0.0
     correlate_loc_max = None  # Index for correlation function. Should be swapped with a param option
+    delta_fp = 0  # Range of frequencies in freq_span
+    fc_param = None
+    g_param = None
+    fmax_ge_param = None
+    d_param = None
 
     # TODO: Switch correlate_loc_max with a param
 
@@ -82,6 +89,7 @@ class STSSolution:
         volt_range_min, volt_range_max = np.float(n.group(1)), np.float(n.group(2))  # More of the same
 
         self.freq_span = np.linspace(freq_range_min, freq_range_max, self.dataLength)
+        self.delta_fp = self.freq_span[-1] - self.freq_span[0]
         self.volt_span = np.linspace(volt_range_min, volt_range_max, self.dataWidth)
 
         self.voltage_offset = np.array([self.volt_span[i] - self.volt_span[0] for i in range(self.dataWidth)])
@@ -140,6 +148,11 @@ class STSSolution:
 
     def extract_sweet_spot(self):
         self.voltage_sweet_spot = self.phi_param + self.period * self.duty_param / 2 - self.period
+        voltage_index = 0
+        for i, v in enumerate(self.volt_span):
+            if self.voltage_sweet_spot > v:
+                voltage_index = i
+        self.freq_sweet_spot = self.freq_span[np.argmin(self.data[:, voltage_index])]
 
     def get_slice_freq_vs_amp(self, voltage):
 
@@ -175,16 +188,16 @@ class STSSolution:
 
     def visualize_data(self):
 
-        fig, ax = plt.subplots(figsize=(12, 6))
+        fig = plt.figure(figsize=(12, 6))
 
         extent = [self.volt_span[0], self.volt_span[-1], self.freq_span[0], self.freq_span[-1]]
-        img = ax.imshow(self.data, cmap='gist_rainbow_r', origin='lower', aspect='auto', extent=extent)
-        ax.set_xlabel(r"$V$")
-        ax.set_ylabel(r'$f_p$ [GHz]')
+        img = plt.imshow(self.data, cmap='gist_rainbow_r', origin='lower', aspect='auto', extent=extent)
+        plt.xlabel(r"$V$")
+        plt.ylabel(r'$f_p$ [GHz]')
         cbar = plt.colorbar(img)
         cbar.ax.set_ylabel(r"$|{S_{21}|$")
 
-        return fig, ax
+        return fig
 
     def visualize_autoCorrelation(self):
         fig, ax = plt.subplots(figsize=(12, 6))
@@ -257,3 +270,110 @@ class STSSolution:
 
     def get_sweet_spot(self):
         return self.voltage_sweet_spot
+
+
+    def f_ge_func(self, I_i, d, fmax_ge):
+
+        cos_term = np.cos(np.pi * (I_i - self.voltage_sweet_spot) / self.period) ** 2
+        sin_term = d ** 2 * np.sin(np.pi * (I_i - self.voltage_sweet_spot) / self.period) ** 2
+        sum_term = (cos_term + sin_term)
+        sum_term = sum_term ** (1.0 / 4.0)
+
+        return fmax_ge * sum_term
+
+
+    def f_function(self, voltage_i, f_c, g, fmax_ge, d):
+        f_ge = self.f_ge_func(voltage_i, d, fmax_ge)
+
+        lhs = (f_c + f_ge) / 2
+        sqrt_stuff = np.sqrt(g ** 2 + ((f_ge - f_c) ** 2) / 4)
+        plus = lhs + sqrt_stuff
+        minus = lhs - sqrt_stuff
+        return plus, minus
+
+
+    def m_function(self, voltage_i, f_c, g, fmax_ge, d):
+        f_plus, f_minus = self.f_function(voltage_i, f_c, g, fmax_ge, d)
+        return f_plus
+
+        # if abs(f_plus - f_c) < self.delta_fp / 2:
+        #     return f_plus
+        # else:
+        #     return f_minus
+
+    @staticmethod
+    def loss_function(x, self):  # x := ([f_c, g, fmax_ge, d]):
+        total = 0
+
+        f_c = x[0]
+        g = x[1]
+        fmax_ge = x[2]
+        d = x[3]
+
+        for i, v_i in enumerate(self.volt_span):
+            total += (self.minimum_frequencies[i] - self.m_function(v_i, f_c, g, fmax_ge, d)) ** 2
+        return total
+
+    def extract_hamiltonian_params(self):
+        bounds_array_upper = (np.mean(self.minimum_frequencies)+.001, .1, 12.0, 0.9)
+        bounds_array_lower = (np.mean(self.minimum_frequencies)- .001, .09, 4.0, 0.0)
+
+        x_initial = [np.mean(self.freq_span)-.0005, .091, 4.5, .5]
+        bounds = ParamBounds(xmax=bounds_array_upper, xmin=bounds_array_lower)
+
+        print("Attempting to minimize loss function for Hamiltonian parameters")
+        minimizer_kwargs = {"args": self}
+        basin_result = basinhopping(self.loss_function, x_initial, niter = 100, accept_test = bounds,
+                                    minimizer_kwargs=minimizer_kwargs, T =1e-6)
+
+
+
+        if(basin_result.pop('lowest_optimization_result')['success']):
+            print("Loss function minimized successfully\n\t Saving hamiltonian params to solution object")
+            self.fc_param = basin_result.x[0]
+            self.g_param = basin_result.x[1]
+            self.fmax_ge_param = basin_result.x[2]
+            self.d_param = basin_result.x[3]
+
+        else:
+            print("Loss function minimization with basin hopping failled\n\t Attempting nelder-mead minimization")
+            self.extract_nelder_mead(x_initial, bounds)
+
+    def extract_nelder_mead(self, x_initial=[],bounds=[]):
+        if (not x_initial):
+            x_initial = np.array([np.mean(self.freq_span)-.0005, .03, 4.5, .5])
+
+        mead_result = minimize(self.loss_function, x_initial,method='Nelder-Mead', args=(self))
+
+        # if(np.all(mead_result.x <= bounds.xmax)) and (np.all(mead_result.x >= bounds.xmin)):
+        print("Found solution using nelder-mead minimization algorithm")
+        print("\tSaving hamiltonian params to solution object")
+        self.fc_param = mead_result.x[0]
+        self.g_param = mead_result.x[1]
+        self.fmax_ge_param = mead_result.x[2]
+        self.d_param = mead_result.x[3]
+        # else:
+        #     if(mead_result.success):
+        #         print("Successfully minimized function outside of bounds. Use caution proceeding")
+        #         print("\t Saving hamiltonian params to solution object")
+        #         self.fc_param = mead_result.x[0]
+        #         self.g_param = mead_result.x[1]
+        #         self.fmax_ge_param = mead_result.x[2]
+        #         self.d_param = mead_result.x[3]
+        #     else:
+        #         print("Function not minimized. Parameters could not be extracted")
+
+
+
+class ParamBounds(object):
+
+    def __init__(self, xmax=(1.1, 1.1, 1.1, 1.1), xmin=(-1.1, -1.1, -1.1, -1.1)):
+        self.xmax = np.array(xmax)
+        self.xmin = np.array(xmin)
+
+    def __call__(self, **kwargs):
+        x = kwargs["x_new"]
+        tmax = bool(np.all(x <= self.xmax))
+        tmin = bool(np.all(x >= self.xmin))
+
+        return tmax and tmin
