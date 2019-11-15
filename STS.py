@@ -32,6 +32,7 @@ class STSSolution:
     phi_param = 0.0  # Extracted meander start (units of voltage)
     duty_param = 0.0  # Extracted duty cycle
     voltage_sweet_spot = 0.0  # Voltage location of sweet spot
+    freq_sweet_spot = 0.0
     correlate_loc_max = None  # Index for correlation function. Should be swapped with a param option
     delta_fp = 0  # Range of frequencies in freq_span
     fc_param = None
@@ -140,6 +141,11 @@ class STSSolution:
 
     def extract_sweet_spot(self):
         self.voltage_sweet_spot = self.phi_param + self.period * self.duty_param / 2 - self.period
+        voltage_index = 0
+        for i, v in enumerate(self.volt_span):
+            if self.voltage_sweet_spot > v:
+                voltage_index = i
+        self.freq_sweet_spot = self.freq_span[np.argmin(self.data[:, voltage_index])]
 
     def get_slice_freq_vs_amp(self, voltage):
 
@@ -281,11 +287,12 @@ class STSSolution:
 
     def m_function(self, voltage_i, f_c, g, fmax_ge, d):
         f_plus, f_minus = self.f_function(voltage_i, f_c, g, fmax_ge, d)
+        return f_plus
 
-        if abs(f_plus - f_c) < self.delta_fp / 2:
-            return f_plus
-        else:
-            return f_minus
+        # if abs(f_plus - f_c) < self.delta_fp / 2:
+        #     return f_plus
+        # else:
+        #     return f_minus
 
     @staticmethod
     def loss_function(x, self):  # x := ([f_c, g, fmax_ge, d]):
@@ -297,14 +304,14 @@ class STSSolution:
         d = x[3]
 
         for i, v_i in enumerate(self.volt_span):
-            total += (self.freq_span[i] - self.m_function(v_i, f_c, g, fmax_ge, d)) ** 2
+            total += (self.minimum_frequencies[i] - self.m_function(v_i, f_c, g, fmax_ge, d)) ** 2
         return total
 
     def extract_hamiltonian_params(self):
-        bounds_array_upper = [np.mean(self.freq_span)+.001, .1, 12.0, 0.9]
-        bounds_array_lower = [np.mean(self.freq_span)- .001, .09, 4.0, 0.0]
+        bounds_array_upper = (np.mean(self.minimum_frequencies)+.001, .1, 12.0, 0.9)
+        bounds_array_lower = (np.mean(self.minimum_frequencies)- .001, .09, 4.0, 0.0)
 
-        x_initial = [np.mean(self.freq_span)-.0005, .095, 4.5, .5]
+        x_initial = [np.mean(self.freq_span)-.0005, .091, 4.5, .5]
         bounds = ParamBounds(xmax=bounds_array_upper, xmin=bounds_array_lower)
 
         print("Attempting to minimize loss function for Hamiltonian parameters")
@@ -326,7 +333,7 @@ class STSSolution:
             self.extract_nelder_mead(x_initial, bounds)
 
     def extract_nelder_mead(self, x_initial=[],bounds=[]):
-        if(not x_initial):
+        if (not x_initial):
             x_initial = np.array([np.mean(self.freq_span)-.0005, .03, 4.5, .5])
 
         mead_result = minimize(self.loss_function, x_initial,method='Nelder-Mead', args=(self))
@@ -353,7 +360,7 @@ class STSSolution:
 
 class ParamBounds(object):
 
-    def __init__(self, xmax=[1.1, 1.1, 1.1, 1.1], xmin=[-1.1, -1.1, -1.1, -1.1]):
+    def __init__(self, xmax=(1.1, 1.1, 1.1, 1.1), xmin=(-1.1, -1.1, -1.1, -1.1)):
         self.xmax = np.array(xmax)
         self.xmin = np.array(xmin)
 
