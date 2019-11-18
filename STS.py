@@ -124,12 +124,12 @@ class STSSolution:
         loc_min = np.argmin(self.correlation_function)
         self.correlate_loc_max = np.argmax(self.correlation_function[loc_min:]) + loc_min
 
-        self.period = self.voltage_offset[self.correlate_loc_max]
+        self.period = self.voltage_offset[self.correlate_loc_max-1]
 
     def extract_duty_phi(self):
 
         self.auto_correlation_matrix = np.zeros(50 * 50).reshape(50, 50)
-        self.phi_space = np.linspace(-self.period / 2, self.period / 2, 50)
+        self.phi_space = np.linspace(-self.period / 2.0, self.period / 2.0, 50)
         self.duty_space = np.linspace(0, .99, 50)
         for i, phi in enumerate(self.phi_space):
             for j, duty in enumerate(self.duty_space):
@@ -147,7 +147,11 @@ class STSSolution:
         self.duty_param = self.duty_space[col]
 
     def extract_sweet_spot(self):
+
+
         self.voltage_sweet_spot = self.phi_param + self.period * self.duty_param / 2 - self.period
+
+        self.period = self.voltage_offset[self.correlate_loc_max+1]
         voltage_index = 0
         for i, v in enumerate(self.volt_span):
             if self.voltage_sweet_spot > v:
@@ -285,8 +289,8 @@ class STSSolution:
     def f_function(self, voltage_i, f_c, g, fmax_ge, d):
         f_ge = self.f_ge_func(voltage_i, d, fmax_ge)
 
-        lhs = (f_c + f_ge) / 2
-        sqrt_stuff = np.sqrt(g ** 2 + ((f_ge - f_c) ** 2) / 4)
+        lhs = (f_c + f_ge) / 2.0
+        sqrt_stuff = np.sqrt(g ** 2.0 + ((f_ge - f_c) ** 2) / 4.0)
         plus = lhs + sqrt_stuff
         minus = lhs - sqrt_stuff
         return plus, minus
@@ -312,22 +316,22 @@ class STSSolution:
 
         for i, v_i in enumerate(self.volt_span):
             total += (self.minimum_frequencies[i] - self.m_function(v_i, f_c, g, fmax_ge, d)) ** 2
-        return total
+        return total * 10e3
 
     def extract_hamiltonian_params(self):
         bounds_array_upper = (np.mean(self.minimum_frequencies)+.001, .1, 12.0, 0.9)
         bounds_array_lower = (np.mean(self.minimum_frequencies)- .001, .09, 4.0, 0.0)
 
-        x_initial = [np.mean(self.freq_span)-.0005, .091, 4.5, .5]
+        x_initial = [np.mean(self.minimum_frequencies)-.0005, .09, np.mean(self.minimum_frequencies), 0.0]
         bounds = ParamBounds(xmax=bounds_array_upper, xmin=bounds_array_lower)
 
         print("Attempting to minimize loss function for Hamiltonian parameters")
-        minimizer_kwargs = {"args": self}
-        basin_result = basinhopping(self.loss_function, x_initial, niter = 100, accept_test = bounds,
-                                    minimizer_kwargs=minimizer_kwargs, T =1e-6)
+        minimizer_kwargs = {'method':'L-BFGS-B', "args": self}
+        basin_result = basinhopping(self.loss_function, x_initial, niter = 200, accept_test = bounds,
+                                    minimizer_kwargs=minimizer_kwargs ,T=1e-5, stepsize=0.001)
 
 
-
+        print(basin_result)
         if(basin_result.pop('lowest_optimization_result')['success']):
             print("Loss function minimized successfully\n\t Saving hamiltonian params to solution object")
             self.fc_param = basin_result.x[0]
@@ -340,10 +344,18 @@ class STSSolution:
             self.extract_nelder_mead(x_initial, bounds)
 
     def extract_nelder_mead(self, x_initial=[],bounds=[]):
-        if (not x_initial):
-            x_initial = np.array([np.mean(self.freq_span)-.0005, .03, 4.5, .5])
+        if (x_initial==[]):
+            print("No initial values passed for x_inital, using mean values")
+            x_initial = np.array([np.mean(self.minimum_frequencies)-.0005, .03, 6.0, .5])
 
-        mead_result = minimize(self.loss_function, x_initial,method='Nelder-Mead', args=(self))
+        if (bounds==[]):
+            print("No initial bounds passed, using assumed bounds")
+            lb = bounds_array_lower = (np.mean(self.minimum_frequencies)- .001, .09, 4.0, 0.0)
+            ub = (np.mean(self.minimum_frequencies)+.001, .1, 12.0, 0.9)
+            bounds = Bounds(lb, ub)
+
+        mead_result = minimize(self.loss_function, x_initial,method='SLSQP', args=(self),
+                               bounds=bounds, callback=print_mead)
 
         # if(np.all(mead_result.x <= bounds.xmax)) and (np.all(mead_result.x >= bounds.xmin)):
         print("Found solution using nelder-mead minimization algorithm")
@@ -373,7 +385,17 @@ class ParamBounds(object):
 
     def __call__(self, **kwargs):
         x = kwargs["x_new"]
+
+        # for i,y in enumerate(self.xmax):
+        #     tmax = tmax and (x[i] < y)
+        #     tmin = tmin and (self.xmin[i] > x[i])
         tmax = bool(np.all(x <= self.xmax))
         tmin = bool(np.all(x >= self.xmin))
 
         return tmax and tmin
+
+def print_fun(x, f, accepted):
+    print("at minimum %.14f accepted %d" % (f, int(accepted)))
+
+def print_mead(x):
+    print("at minimum loc [%.14f, %.14f, %.14f, %.14f]" % (x[0], x[1], x[2], x[3]))
