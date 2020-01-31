@@ -139,15 +139,18 @@ class STSSolution:
 
                 self.auto_correlation_matrix[i, j] = -1 * r
 
+        #ind = np.unravel_index(np.argmin(self.auto_correlation_matrix, axis=None), self.auto_correlation_matrix.shape)
+        #
+        # row = ind[0]
+        # col = ind[1]
+
         lin_index = np.argmin(self.auto_correlation_matrix)
         row = lin_index // 50
         col = lin_index % 50
-
         self.phi_param = self.phi_space[row]
         self.duty_param = self.duty_space[col]
 
     def extract_sweet_spot(self):
-
 
         self.voltage_sweet_spot = self.phi_param + self.period * self.duty_param / 2 - self.period
 
