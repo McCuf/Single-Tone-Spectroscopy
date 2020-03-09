@@ -8,6 +8,7 @@ from scipy.interpolate import interp1d
 from scipy import signal
 from scipy.optimize import minimize
 from scipy.optimize import basinhopping
+from scipy.optimize import curve_fit
 from scipy.optimize import brute
 from scipy.optimize import Bounds
 
@@ -37,7 +38,9 @@ class STSSolution:
     freq_sweet_spot = 0.0
     correlate_loc_max = None  # Index for correlation function. Should be swapped with a param option
     delta_fp = 0  # Range of frequencies in freq_span
-    fc_param = None
+    fc_param = 0
+    interp_volt_axis = None
+    interp_min_freq = None
     g_param = None
     fmax_ge_param = None
     d_param = None
@@ -139,15 +142,18 @@ class STSSolution:
 
                 self.auto_correlation_matrix[i, j] = -1 * r
 
+        #ind = np.unravel_index(np.argmin(self.auto_correlation_matrix, axis=None), self.auto_correlation_matrix.shape)
+        #
+        # row = ind[0]
+        # col = ind[1]
+
         lin_index = np.argmin(self.auto_correlation_matrix)
         row = lin_index // 50
         col = lin_index % 50
-
         self.phi_param = self.phi_space[row]
         self.duty_param = self.duty_space[col]
 
     def extract_sweet_spot(self):
-
 
         self.voltage_sweet_spot = self.phi_param + self.period * self.duty_param / 2 - self.period
 
@@ -202,7 +208,19 @@ class STSSolution:
         cbar.ax.set_ylabel(r"$|{S_{21}|$")
 
         return fig
+    def visualize_comparison(self):
+        fig, ax = plt.subplots(figsize=(12,12))
+        if(self.fc_param):
+            print("Hamiltonian parameters saved...\n \t Creating Comparison plot")
+            ax.plot(self.interp_volt_axis, self.interp_min_freq, label='Original data (interpolated)')
+            ax.plot(self.interp_volt_axis, self.f_function(self.interp_volt_axis,self.fc_param,
+                                           self.g_param, self.fmax_ge_param, self.d_param, self.period, self.voltage_sweet_spot), label='Fit')
+            plt.legend()
+            plt.grid()
+        else:
+            print("Hamiltonian parameters not computed...\n Run curve_fit_STS or extract_hamiltonian_params")
 
+        return fig, ax
     def visualize_autoCorrelation(self):
         fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -276,29 +294,27 @@ class STSSolution:
         return self.voltage_sweet_spot
 
 
-    def f_ge_func(self, I_i, d, fmax_ge):
+    def f_ge_func(self, I_i, d, fmax_ge, period, voltage_sweet_spot):
 
-        cos_term = np.cos(np.pi * (I_i - self.voltage_sweet_spot) / self.period) ** 2
-        sin_term = d ** 2 * np.sin(np.pi * (I_i - self.voltage_sweet_spot) / self.period) ** 2
+        cos_term = np.cos(np.pi * (I_i - self.voltage_sweet_spot) / period) ** 2
+        sin_term = d ** 2 * np.sin(np.pi * (I_i - self.voltage_sweet_spot) / period) ** 2
         sum_term = (cos_term + sin_term)
         sum_term = sum_term ** (1.0 / 4.0)
 
         return fmax_ge * sum_term
 
-
-    def f_function(self, voltage_i, f_c, g, fmax_ge, d):
-        f_ge = self.f_ge_func(voltage_i, d, fmax_ge)
+    def f_function(self, voltage_i, f_c, g, fmax_ge, d, period, voltage_sweet_spot):
+        f_ge = self.f_ge_func(voltage_i, d, fmax_ge, period, voltage_sweet_spot)
 
         lhs = (f_c + f_ge) / 2.0
         sqrt_stuff = np.sqrt(g ** 2.0 + ((f_ge - f_c) ** 2) / 4.0)
         plus = lhs + sqrt_stuff
-        minus = lhs - sqrt_stuff
-        return plus, minus
 
+        return plus
 
-    def m_function(self, voltage_i, f_c, g, fmax_ge, d):
-        f_plus, f_minus = self.f_function(voltage_i, f_c, g, fmax_ge, d)
-        return f_plus
+    def m_function(self, voltage_i, f_c, g, fmax_ge, d, period, voltage_sweet_spot):
+        return self.f_function(voltage_i, f_c, g, fmax_ge, d, period, voltage_sweet_spot)
+
 
         # if abs(f_plus - f_c) < self.delta_fp / 2:
         #     return f_plus
@@ -313,16 +329,24 @@ class STSSolution:
         g = x[1]
         fmax_ge = x[2]
         d = x[3]
-
-        for i, v_i in enumerate(self.volt_span):
-            total += (self.minimum_frequencies[i] - self.m_function(v_i, f_c, g, fmax_ge, d)) ** 2
-        return total * 10e3
+        period = x[4]
+        voltage_sweet_spot = x[5]
+        for i, v_i in enumerate(self.interp_volt_axis):
+            total += (self.interp_min_freq[i] - self.m_function(v_i, f_c, g, fmax_ge, d, period, voltage_sweet_spot)) ** 2
+        return total
 
     def extract_hamiltonian_params(self):
-        bounds_array_upper = (np.mean(self.minimum_frequencies)+.001, .1, 12.0, 0.9)
-        bounds_array_lower = (np.mean(self.minimum_frequencies)- .001, .09, 4.0, 0.0)
 
-        x_initial = [np.mean(self.minimum_frequencies)-.0005, .09, np.mean(self.minimum_frequencies), 0.0]
+        self.interp_volt_axis = np.linspace(self.volt_span[0], self.volt_span[-1], 100)
+
+        interpolation_scheme = interp1d(self.volt_span, self.minimum_frequencies, kind='quadratic')
+        self.interp_min_freq = interpolation_scheme(self.interp_volt_axis)
+
+        bounds_array_upper = (np.mean(self.minimum_frequencies)+.001, .1, 12.0, 0.9, self.volt_span[-1], self.volt_span[-1])
+        bounds_array_lower = (np.mean(self.minimum_frequencies)- .001, .09, 4.0, 0.0, self.volt_span[0], self.volt_span[0])
+
+        x_initial = [np.mean(self.minimum_frequencies)-.0005, .09, np.max(self.minimum_frequencies), 0.5, self.period,
+                                                                self.voltage_sweet_spot]
         bounds = ParamBounds(xmax=bounds_array_upper, xmin=bounds_array_lower)
 
         print("Attempting to minimize loss function for Hamiltonian parameters")
@@ -331,17 +355,32 @@ class STSSolution:
                                     minimizer_kwargs=minimizer_kwargs ,T=1e-5, stepsize=0.001)
 
 
-        print(basin_result)
+
         if(basin_result.pop('lowest_optimization_result')['success']):
             print("Loss function minimized successfully\n\t Saving hamiltonian params to solution object")
             self.fc_param = basin_result.x[0]
             self.g_param = basin_result.x[1]
             self.fmax_ge_param = basin_result.x[2]
             self.d_param = basin_result.x[3]
-
+            self.period = basin_result.x[4]
+            self.voltage_sweet_spot = basin_result.x[5]
         else:
             print("Loss function minimization with basin hopping failled\n\t Attempting nelder-mead minimization")
             self.extract_nelder_mead(x_initial, bounds)
+
+    def curve_fit_STS(self):
+
+        print("Attempting a curve fit solution to extract hamiltonian parameters")
+        #f_c, g, fmax_ge, d, p, Iss
+        p0 = [self.fc_param, self.g_param, self.fmax_ge_param, self.d_param, self.period, self.voltage_sweet_spot]
+        curve_fit_params = curve_fit(self.f_function, self.interp_volt_axis, self.interp_min_freq, p0=p0)
+        self.fc_param = curve_fit_params[0][0]
+        self.g_param = curve_fit_params[0][1]
+        self.fmax_ge_param = curve_fit_params[0][2]
+        self.d_param = curve_fit_params[0][3]
+        self.period = curve_fit_params[0][4]
+        self.voltage_sweet_spot = curve_fit_params[0][5]
+
 
     def extract_nelder_mead(self, x_initial=[],bounds=[]):
         if (x_initial==[]):
