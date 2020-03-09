@@ -1,9 +1,10 @@
 # Single-Tone-Spectroscopy
 This is a python library which uses an OOP approach to automating STS data analysis. 
-The STSSolution class implements a traditional method of extracting the parameters. 
+The STSSolution class implements a novel method of extracting the parameters by using
+basinhopping. 
 
-This library is based on the paper _Automated analysis of single-tone 
-spectroscopic data for cQED systems_
+This library is based on the paper **Automated analysis of single-tone 
+spectroscopic data for cQED systems**
 G.P. Fedorov and A. V. Ustinov. A copy can be found in the references directory
 on the page
 
@@ -20,13 +21,14 @@ file doesn't follow the naming convention which is given as an example in the da
 - The upper sweet spot frequency associated with the voltage
 
 Here is an example of how to initialize an STSSolution object and check the values of the
-sweet spot voltage and frequency
+sweet spot voltage and frequency (Note: these are guesses which are used to tune
+the basinhopping model)
 
     from STS import STSSolution
     solution = STSSolution("data/AB40_S21vsFvsV_fr6.03_6.05_Pr-80_V-1.5_1.5_0.1_T0.084_Cav2_143704_mag.dat")
     
-    print("The voltage sweet spot is", solution.voltage_sweet_spot)
-    print("The frequency at the sweet spot is", solution.frequency_sweet_spot)
+    print("The guessed voltage sweet spot is", solution.voltage_sweet_spot)
+    print("The guessed frequency at the sweet spot is", solution.frequency_sweet_spot)
     
 It may also be helpful to check the sweet spots against the raw data. Occasionally 
 the sweet spot will be off by 1 period.
@@ -37,11 +39,11 @@ Here is an example of how to visualize data, and what the results ought to look 
 
     fig = solution.visualize_data() #Produces magnitude of S21 againsts swept freq. and voltage
     plt.show()
- ![Data](visualize_data.png)   
+ ![Data](Plots/visualize_data.png)   
  
     fig, ax = solution.visualize_autoCorrelation()
     plt.show()
- ![Data](visualize_autoCorrelation.png)
+ ![Data](Plots/visualize_autoCorrelation.png)
  
 
 The second plot shows the autocorrelation function and location of the
@@ -54,7 +56,7 @@ which the STS Solution library stores in an array belonging to the class.
     plt.plot(sol.volt_span, sol.minimum_frequencies)
     plt.show()
     
-  ![Data](visualize_minimum_freqs.png)
+  ![Data](Plots/visualize_minimum_freqs.png)
 
 Viewing the STS measurement in this manner is especially useful because
 the average over all frequencies corresponding to a delta function of those frequencies
@@ -73,7 +75,7 @@ and duty cycle.
     fig, axs = sol.visualize_duty_phi()
     plt.show()
     
-  ![Data](duty_phi.png)
+  ![Data](Plots/duty_phi.png)
  
 The red dot indicates the location of the minimum of the loss function
 The orange curve is the best fit PWM square pulse.  
@@ -90,6 +92,8 @@ for the cQED system. The parameters this library extracts are
 2. fmax_ge --> Transmon frequency at sweet spot
 3. d       --> Transmon asymmetry parameter
 4. g       --> cavity-qubit coupling constant
+5. PI      --> Period
+6. V_s     --> Sweet spot voltage
 
 These parameters are extracted by using a basin hopping algorithm to find the global minimum 
 of a loss function given in the paper. The resulting extraction is the most time consuming
@@ -109,14 +113,16 @@ The full model fit can be visualized as follows
     #sol is an instance of the STSSolution class
     sol.extract_hamiltonian_params() #<-- only needs to be called once per measurement
     
-    plt.plot(sol.volt_span, \
-        sol.f_function(sol.fc_param, sol.g_param, sol.fmax_ge_param, sol.d_param)[0])
+    plt.plot(sol.interp_volt_axis, \
+        sol.interp_min_freq)
     
-    plt.plot(sol.volt_span, sol.minimum_frequencies)
+    plt.plot(sol.interp_volt_axis, sol.f_function(self.interp_volt_axis, sol.fc_param,
+                                    sol.g_param, sol.fmax_ge_param, sol.d_param, 
+                                    sol.period, sol.voltage_sweet_spot)
     
     plt.show()
 
-![Data](full_model_fit.png)
+![Data](Plots/ComparisonPlot_fullModelFit.png)
 
 
 
