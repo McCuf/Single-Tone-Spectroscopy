@@ -1,7 +1,6 @@
 import re
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
-from mpl_toolkits.axes_grid1.colorbar import colorbar
 
 import numpy as np
 from scipy.interpolate import interp1d
@@ -72,16 +71,7 @@ class STSSolution:
         self.dataLength = self.data.shape[0]
         self.dataWidth = self.data.shape[1]
 
-        # with open(self.path) as f:  # Parse the .dat file and read in data
-        #     for line in f:
-        #         self.dataLength += 1
-        #         self.data.append(np.array(line.split(), dtype=np.float))
-
-        # self.dataWidth = len(self.data[0])
-
         self.check_data()  # Perform uniformity check
-
-        # self.data = np.array(self.data)  # cast to numpy array
 
         # Gather the freq/volt information from the path variable. TODO: Add param to __init__ to make this optional
 
@@ -342,8 +332,8 @@ class STSSolution:
         interpolation_scheme = interp1d(self.volt_span, self.minimum_frequencies, kind='quadratic')
         self.interp_min_freq = interpolation_scheme(self.interp_volt_axis)
 
-        bounds_array_upper = (np.mean(self.minimum_frequencies)+.001, .1, 12.0, 0.9, self.volt_span[-1], self.volt_span[-1])
-        bounds_array_lower = (np.mean(self.minimum_frequencies)- .001, .09, 4.0, 0.0, self.volt_span[0], self.volt_span[0])
+        bounds_array_upper = (np.mean(self.minimum_frequencies) + .001, .1, 12.0, 0.9, self.volt_span[-1], self.volt_span[-1])
+        bounds_array_lower = (np.mean(self.minimum_frequencies) - .001, .09, 4.0, 0.0, self.volt_span[0], self.volt_span[0])
 
         x_initial = [np.mean(self.minimum_frequencies)-.0005, .09, np.max(self.minimum_frequencies), 0.5, self.period,
                                                                 self.voltage_sweet_spot]

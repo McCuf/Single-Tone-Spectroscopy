@@ -67,7 +67,7 @@ function is then an ideal candidate to be autocorrelated to extract the period.
 **In order to extract the sweet spot, a brute force computation is done to find the phase shift
 and duty cycle**
 
-The phase and duty cycle can be extracted by minimizing the autocorrelation function between
+The phase and duty cycle can be extracted by minimizing the zero-lag correlation function between
 the delta function and a pulse-width modulated square pulse, over a matrix of values for phase 
 and duty cycle. 
 
