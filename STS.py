@@ -44,7 +44,8 @@ class STSSolution:
     g_param = None
     fmax_ge_param = None
     d_param = None
-
+    voltage_sweet_spot_h = None
+    
     # TODO: Switch correlate_loc_max with a param
 
     def __init__(self, path):
@@ -156,8 +157,9 @@ class STSSolution:
     def extract_sweet_spot(self):
 
         self.voltage_sweet_spot = self.phi_param + self.period * self.duty_param / 2 - self.period
+        self.voltage_sweet_spot_h = self.voltage_sweet_spot + self.period - self.phi_param
 
-        self.period = self.voltage_offset[self.correlate_loc_max+1]
+        
         voltage_index = 0
         for i, v in enumerate(self.volt_span):
             if self.voltage_sweet_spot > v:
@@ -296,8 +298,8 @@ class STSSolution:
 
     def f_ge_func(self, I_i, d, fmax_ge, period, voltage_sweet_spot):
 
-        cos_term = np.cos(np.pi * (I_i - self.voltage_sweet_spot) / period) ** 2
-        sin_term = d ** 2 * np.sin(np.pi * (I_i - self.voltage_sweet_spot) / period) ** 2
+        cos_term = np.cos(np.pi * (I_i - voltage_sweet_spot) / period) ** 2
+        sin_term = d ** 2 * np.sin(np.pi * (I_i - voltage_sweet_spot) / period) ** 2
         sum_term = (cos_term + sin_term)
         sum_term = sum_term ** (1.0 / 4.0)
 
@@ -316,10 +318,6 @@ class STSSolution:
         return self.f_function(voltage_i, f_c, g, fmax_ge, d, period, voltage_sweet_spot)
 
 
-        # if abs(f_plus - f_c) < self.delta_fp / 2:
-        #     return f_plus
-        # else:
-        #     return f_minus
 
     @staticmethod
     def loss_function(x, self):  # x := ([f_c, g, fmax_ge, d]):
@@ -337,26 +335,37 @@ class STSSolution:
 
     def extract_hamiltonian_params(self):
 
-        self.interp_volt_axis = np.linspace(self.volt_span[0], self.volt_span[-1], 100)
+        self.interp_volt_axis = np.linspace(self.volt_span[0], self.volt_span[-1], 50)
 
         interpolation_scheme = interp1d(self.volt_span, self.minimum_frequencies, kind='quadratic')
         self.interp_min_freq = interpolation_scheme(self.interp_volt_axis)
 
         bounds_array_upper = (np.mean(self.minimum_frequencies)+.001, .1, 12.0, 0.9, self.volt_span[-1], self.volt_span[-1])
         bounds_array_lower = (np.mean(self.minimum_frequencies)- .001, .09, 4.0, 0.0, self.volt_span[0], self.volt_span[0])
-
-        x_initial = [np.mean(self.minimum_frequencies)-.0005, .09, np.max(self.minimum_frequencies), 0.5, self.period,
+        
+        x_initial = [self.fc_param, 0.05, self.fmax_ge_param, 0.5, self.period,
                                                                 self.voltage_sweet_spot]
+        y_initial = [self.fc_param, 0.05, self.fmax_ge_param, 0.5, self.period,
+                                                                self.voltage_sweet_spot_h]
         bounds = ParamBounds(xmax=bounds_array_upper, xmin=bounds_array_lower)
 
         print("Attempting to minimize loss function for Hamiltonian parameters")
         minimizer_kwargs = {'method':'L-BFGS-B', "args": self}
-        basin_result = basinhopping(self.loss_function, x_initial, niter = 200, accept_test = bounds,
+        basin_result_1 = basinhopping(self.loss_function, x_initial, niter = 200, accept_test = bounds,
                                     minimizer_kwargs=minimizer_kwargs ,T=1e-5, stepsize=0.001)
-
-
-
+        
+        
+        basin_result_2 = basinhopping(self.loss_function, y_initial, niter=200, accept_test = bounds,
+                                     minimizer_kwargs=minimizer_kwargs)
+        
+    
+        if (basin_result_2.fun <= basin_result_1.fun):
+            basin_result = basin_result_2
+            print("HyperParameter tuning successulf")
+        else:
+            basin_result = basin_result_1
         if(basin_result.pop('lowest_optimization_result')['success']):
+            
             print("Loss function minimized successfully\n\t Saving hamiltonian params to solution object")
             self.fc_param = basin_result.x[0]
             self.g_param = basin_result.x[1]
@@ -369,11 +378,15 @@ class STSSolution:
             self.extract_nelder_mead(x_initial, bounds)
 
     def curve_fit_STS(self):
+        self.interp_volt_axis = np.linspace(self.volt_span[0], self.volt_span[-1], 50)
 
+        interpolation_scheme = interp1d(self.volt_span, self.minimum_frequencies, kind='quadratic')
+        self.interp_min_freq = interpolation_scheme(self.interp_volt_axis)
         print("Attempting a curve fit solution to extract hamiltonian parameters")
         #f_c, g, fmax_ge, d, p, Iss
-        p0 = [self.fc_param, self.g_param, self.fmax_ge_param, self.d_param, self.period, self.voltage_sweet_spot]
-        curve_fit_params = curve_fit(self.f_function, self.interp_volt_axis, self.interp_min_freq, p0=p0)
+        p0 = [np.mean(self.minimum_frequencies)-.001, .05, np.max(self.minimum_frequencies), 0.5, self.period,
+                                                                self.voltage_sweet_spot_h]
+        curve_fit_params = curve_fit(self.f_function, self.interp_volt_axis, self.interp_min_freq, p0=p0,maxfev=int(1e6))
         self.fc_param = curve_fit_params[0][0]
         self.g_param = curve_fit_params[0][1]
         self.fmax_ge_param = curve_fit_params[0][2]
@@ -383,14 +396,21 @@ class STSSolution:
 
 
     def extract_nelder_mead(self, x_initial=[],bounds=[]):
+
+        self.interp_volt_axis = np.linspace(self.volt_span[0], self.volt_span[-1], 50)
+
+        interpolation_scheme = interp1d(self.volt_span, self.minimum_frequencies, kind='quadratic')
+        self.interp_min_freq = interpolation_scheme(self.interp_volt_axis)
+
         if (x_initial==[]):
             print("No initial values passed for x_inital, using mean values")
-            x_initial = np.array([np.mean(self.minimum_frequencies)-.0005, .03, 6.0, .5])
+            x_initial = np.array([np.mean(self.minimum_frequencies)-.001, .05, np.max(self.minimum_frequencies), .5, self.period,
+                                  self.voltage_sweet_spot_h])
 
         if (bounds==[]):
             print("No initial bounds passed, using assumed bounds")
-            lb = bounds_array_lower = (np.mean(self.minimum_frequencies)- .001, .09, 4.0, 0.0)
-            ub = (np.mean(self.minimum_frequencies)+.001, .1, 12.0, 0.9)
+            lb = bounds_array_lower = (np.mean(self.minimum_frequencies)- .001, .09, 4.0, 0.0, self.period- 1, self.voltage_sweet_spot - 1)
+            ub = (np.mean(self.minimum_frequencies)+.001, .1, 12.0, 0.9, self.period+1, self.voltage_sweet_spot + 1)
             bounds = Bounds(lb, ub)
 
         mead_result = minimize(self.loss_function, x_initial,method='SLSQP', args=(self),
@@ -403,6 +423,8 @@ class STSSolution:
         self.g_param = mead_result.x[1]
         self.fmax_ge_param = mead_result.x[2]
         self.d_param = mead_result.x[3]
+        self.period = mead_result.x[4]
+        self.voltage_sweet_spot = mead_result.x[5]
         # else:
         #     if(mead_result.success):
         #         print("Successfully minimized function outside of bounds. Use caution proceeding")
