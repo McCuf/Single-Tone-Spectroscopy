@@ -9,7 +9,6 @@ from scipy import signal
 from scipy.optimize import minimize
 from scipy.optimize import basinhopping
 from scipy.optimize import curve_fit
-from scipy.optimize import brute
 from scipy.optimize import Bounds
 
 
@@ -45,10 +44,21 @@ class STSSolution:
     fmax_ge_param = None
     d_param = None
     voltage_sweet_spot_h = None
+    voltage_sweet_spot_guess = None
+    fc_param_guess = None
+    g_param_guess = None
+    d_param_guess = None
+    fmax_ge_param_guess = None
+    voltage_sweet_spot_guess_h = None
+    fc_param_guess_h = None
+    g_param_guess_h = None
+    d_param_guess_h = None
+    fmax_ge_param_guess_h = None
+    g_guess = None
     
     # TODO: Switch correlate_loc_max with a param
 
-    def __init__(self, path):
+    def __init__(self, path, g_guess = 0.05):
         # To initialize a solution object, all thats needed is a .dat file like the one in examples
         # 5 step process to extracting parameters :::
 
@@ -57,7 +67,7 @@ class STSSolution:
         # 3. Extract Period from step 2
         # 4. Using period from step 3 --> Autocorrelate against square wave / delta fr and minimize the loss function
         # 5. Plug into the formula for sweet spot
-
+        self.g_guess = g_guess
         self.path = path  # Initialize the path
 
         self.configure_data()
@@ -343,9 +353,10 @@ class STSSolution:
         bounds_array_upper = (np.mean(self.minimum_frequencies)+.001, .1, 12.0, 0.9, self.volt_span[-1], self.volt_span[-1])
         bounds_array_lower = (np.mean(self.minimum_frequencies)- .001, .09, 4.0, 0.0, self.volt_span[0], self.volt_span[0])
         
-        x_initial = [self.fc_param, 0.05, self.fmax_ge_param, 0.5, self.period,
-                                                                self.voltage_sweet_spot]
-        y_initial = [self.fc_param, 0.05, self.fmax_ge_param, 0.5, self.period,
+        x_initial = [self.fc_param_guess, self.g_guess, self.fmax_ge_param_guess, 0.5, self.period_guess,
+                                                                self.voltage_sweet_spot_guess]
+
+        y_initial = [self.fc_param_guess_h, self.g_guess, self.fmax_ge_param_guess_h, 0.5, self.period_guess_h,
                                                                 self.voltage_sweet_spot_h]
         bounds = ParamBounds(xmax=bounds_array_upper, xmin=bounds_array_lower)
 
@@ -386,13 +397,28 @@ class STSSolution:
         #f_c, g, fmax_ge, d, p, Iss
         p0 = [np.mean(self.minimum_frequencies)-.001, .05, np.max(self.minimum_frequencies), 0.5, self.period,
                                                                 self.voltage_sweet_spot_h]
-        curve_fit_params = curve_fit(self.f_function, self.interp_volt_axis, self.interp_min_freq, p0=p0,maxfev=int(1e6))
-        self.fc_param = curve_fit_params[0][0]
-        self.g_param = curve_fit_params[0][1]
-        self.fmax_ge_param = curve_fit_params[0][2]
-        self.d_param = curve_fit_params[0][3]
-        self.period = curve_fit_params[0][4]
-        self.voltage_sweet_spot = curve_fit_params[0][5]
+        p1 = [np.mean(self.minimum_frequencies)-.001, .05, np.max(self.minimum_frequencies), 0.5, self.period,
+                                                                self.voltage_sweet_spot]
+
+        curve_fit_params_0 = curve_fit(self.f_function, self.interp_volt_axis, self.interp_min_freq, p0=p0,
+                                     maxfev=int(1e6))
+
+        curve_fit_params_1 = curve_fit(self.f_function, self.interp_volt_axis, self.interp_min_freq, p0=p1,maxfev=int(1e6))
+
+        self.fc_param_guess_h = curve_fit_params_0[0][0]
+        self.g_param_guess_h = curve_fit_params_0[0][1]
+        self.fmax_ge_param_guess_h = curve_fit_params_0[0][2]
+        self.d_param_guess_h = curve_fit_params_0[0][3]
+        self.period_guess_h = curve_fit_params_0[0][4]
+        self.voltage_sweet_spot_guess_h = curve_fit_params_0[0][5]
+
+        self.fc_param_guess = curve_fit_params_1[0][0]
+        self.g_param_guess = curve_fit_params_1[0][1]
+        self.fmax_ge_param_guess = curve_fit_params_1[0][2]
+        self.d_param_guess = curve_fit_params_1[0][3]
+        self.period_guess = curve_fit_params_1[0][4]
+        self.voltage_sweet_spot_guess = curve_fit_params_1[0][5]
+
 
 
     def extract_nelder_mead(self, x_initial=[],bounds=[]):
